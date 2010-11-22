@@ -1,1 +1,7 @@
 This is an inital work on UNIRAST format
+
+decoding.txt shows the decoding of the 1 page urf file from https://github.com/AlanQuatermain/unirast
+
+Thanks for http://alanQuatermain.net/ for its URF file partial decode.
+
+Next step will be simple urf to 32-bit BMP converter.
