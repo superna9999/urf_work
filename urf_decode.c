@@ -9,7 +9,9 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 
 // Data are in network endianness
 struct urf_file_header {
