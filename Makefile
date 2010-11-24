@@ -1,5 +1,3 @@
-all: urf_decode urftobmp
-
-urf_decode:urf_decode.c
+all: urftobmp
 
 urftobmp:urftobmp.c
