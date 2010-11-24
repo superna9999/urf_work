@@ -65,6 +65,7 @@ struct bmp_info
     unsigned height;
     unsigned stride_bytes;
     unsigned pixel_bytes;
+    unsigned line_bytes;
     unsigned file_size;
     unsigned bitmap_size;
     unsigned bitmap_offset;
@@ -144,6 +145,7 @@ int create_bmp_file(unsigned width, unsigned height, struct bmp_info * info, int
     info->height = height;
     info->stride_bytes = line_size;
     info->pixel_bytes = pixel_bytes;
+    info->line_bytes = (width*info->pixel_bytes);
     info->file_size = data_size;
     info->bitmap_size = raw_size;
     info->bitmap_offset = raw_pos;
@@ -152,43 +154,18 @@ int create_bmp_file(unsigned width, unsigned height, struct bmp_info * info, int
     return 0;
 }
 
-void bmp_set_pixel(struct bmp_info * info, int x, int y, unsigned bpp, uint8_t pixel[])
+void bmp_set_line(struct bmp_info * info, int line_n, uint8_t line[])
 {
-    int i;
+    printf("bmp_set_line(%d)\n", line_n);
 
-    printf("bmp_set_pixel(%d, %d, [", x, y);
-
-    for(i = 0 ; i < (bpp/8) ; ++i)
-        printf("%02X ", pixel[i]);
-    printf("]\n");
-
-    if(bpp != info->bpp)
+    if(line_n > info->height)
     {
-        printf("Bad BPP... %d\n", bpp);
+        printf("Bad line %d\n", line_n);
         return;
     }
 
-    if(x > info->width)
-    {
-        printf("Bad pixel width %d\n", x);
-        return;
-    }
-    if(y > info->height)
-    {
-        printf("Bad pixel height %d\n", y);
-        return;
-    }
-
-    switch(bpp)
-    {
-        case 24:
-        {
-            info->bitmap[(info->height-y)*info->stride_bytes + x*info->pixel_bytes + 0] = pixel[2];
-            info->bitmap[(info->height-y)*info->stride_bytes + x*info->pixel_bytes + 1] = pixel[1];
-            info->bitmap[(info->height-y)*info->stride_bytes + x*info->pixel_bytes + 2] = pixel[0];
-        } break;
-        //TODO: Manage other bpp
-    }
+    memcpy(&info->bitmap[(info->height-line_n-1)*info->stride_bytes],
+           line, info->line_bytes);
 }
 
 // Data are in network endianness
@@ -215,97 +192,126 @@ int decode_raster(int fd, int width, int height, int bpp, struct bmp_info * bmp)
 {
     // We should be at raster start
     int i, j;
-    int lines = 0;
+    int cur_line = 0;
     int pos = 0;
-    uint8_t line_repeat = 0;
+    uint8_t line_repeat_byte = 0;
+    unsigned line_repeat = 0;
     int8_t packbit_code = 0;
     int pixel_size = (bpp/8);
     uint8_t * pixel_container;
+    uint8_t * line_container;
 
     pixel_container = malloc(pixel_size);
+    line_container = malloc(pixel_size*width);
 
     do
     {
-        read(fd, &line_repeat, 1);
-        read(fd, &packbit_code, 1);
-
-        printf("%06dx%06d: Raster code %02X='%d' for %02X=%d lines.\n", pos, lines, packbit_code, packbit_code, line_repeat, line_repeat);
-
-        if(packbit_code == -128)
+        if(read(fd, &line_repeat_byte, 1) < 1)
         {
-            if(pos)
-            {   printf("\t%06dx%06d : Go to next line.\n", pos, lines, line_repeat);
-                pos = 0;
-                ++lines;
-                --line_repeat;
-            }
-            printf("\t%06dx%06d : Fill %d blank lines.\n", pos, lines, line_repeat);
-            lines+=line_repeat;
+            printf("l%06d : line_repeat EOF at %lu\n", cur_line, lseek(fd, 0, SEEK_CUR));
+            return 1;
         }
-        else if(packbit_code >= 0 && packbit_code <= 127)
+
+        line_repeat = (unsigned)line_repeat_byte + 1;
+
+        printf("l%06d : next actions for %d lines\n", cur_line, line_repeat);
+
+        // Start of line
+        pos = 0;
+
+        do
         {
-            int n = (packbit_code+1);
-
-            for(i = 0 ; i < line_repeat ; ++i)
+            if(read(fd, &packbit_code, 1) < 1)
             {
-                //Read pixel
-                read(fd, pixel_container, pixel_size);
+                printf("p%06dl%06d : packbit_code EOF at %lu\n", pos, cur_line, lseek(fd, 0, SEEK_CUR));
+                return 1;
+            }
 
-                printf("\t%06dx%06d : Repeat pixel '", pos, lines);
+            printf("p%06dl%06d: Raster code %02X='%d'.\n", pos, cur_line, (uint8_t)packbit_code, packbit_code);
+
+            if(packbit_code == -128)
+            {
+                printf("\tp%06dl%06d : blank rest of line.\n", pos, cur_line);
+                memset((line_container+(pos*pixel_size)), 0xFF, (pixel_size*(width-pos)));
+                pos = width;
+                break;
+            }
+            else if(packbit_code >= 0 && packbit_code <= 127)
+            {
+                int n = (packbit_code+1);
+
+                //Read pixel
+                if(read(fd, pixel_container, pixel_size) < pixel_size)
+                {
+                    printf("p%06dl%06d : pixel repeat EOF at %lu\n", pos, cur_line, lseek(fd, 0, SEEK_CUR));
+                    return 1;
+                }
+
+                printf("\tp%06dl%06d : Repeat pixel '", pos, cur_line);
                 for(j = 0 ; j < pixel_size ; ++j)
                     printf("%02X ", pixel_container[j]);
                 printf("' for %d times.\n", n);
 
-                for(j = 0 ; j < n ; ++j)
+                for(i = 0 ; i < n ; ++i)
                 {
-                    bmp_set_pixel(bmp, pos, lines, bpp, pixel_container);
+                    //for(j = pixel_size-1 ; j >= 0 ; --j)
+                    for(j = 0 ; j < pixel_size ; ++j)
+                        line_container[pixel_size*pos + j] = pixel_container[(pixel_size-j-1)];
                     ++pos;
+                    if(pos >= width)
+                        break;
                 }
 
-                if(pos == width)
+                if(i < n && pos >= width)
                 {
-                    ++lines;
-                    pos = 0;
-                    printf("\t%06dx%06d : New Line\n", pos, lines);
+                    printf("\tp%06dl%06d : Forced end of line for pixel repeat.\n", pos, cur_line);
                 }
-                else if(pos > width)
-                {
-                    ++lines;
-                    pos -= width;
-                    printf("\t%06dx%06d : New Line with offset\n", pos, lines);
-                }
+                
+                if(pos >= width)
+                    break;
             }
-        }
-        else if(packbit_code > -128 && packbit_code < 0)
-        {
-            int n = (-(int)packbit_code)+1;
-
-            for(j = 0 ; j < line_repeat ; ++j)
+            else if(packbit_code > -128 && packbit_code < 0)
             {
-                printf("\t%06dx%06d : Load %d pixels.\n", pos, lines, n);
+                int n = (-(int)packbit_code)+1;
+
+                printf("\tp%06dl%06d : Copy %d verbatim pixels.\n", pos, cur_line, n);
 
                 for(i = 0 ; i < n ; ++i)
                 {
-                    read(fd, pixel_container, pixel_size);
-                    bmp_set_pixel(bmp, pos, lines, bpp, pixel_container);
+                    if(read(fd, pixel_container, pixel_size) < pixel_size)
+                    {
+                        printf("p%06dl%06d : literal_pixel EOF at %lu\n", pos, cur_line, lseek(fd, 0, SEEK_CUR));
+                        return 1;
+                    }
+                    //Invert pixels, should be programmable
+                    for(j = 0 ; j < pixel_size ; ++j)
+                        line_container[pixel_size*pos + j] = pixel_container[(pixel_size-j-1)];
                     ++pos;
+                    if(pos >= width)
+                        break;
                 }
 
-                if(pos == width)
+                if(i < n && pos >= width)
                 {
-                    ++lines;
-                    printf("\t%06dx%06d : New Line\n", pos, lines);
+                    printf("\tp%06dl%06d : Forced end of line for pixel copy.\n", pos, cur_line);
                 }
-                else if(pos > width)
-                {
-                    ++lines;
-                    pos -= width;
-                    printf("\t%06dx%06d : New Line with offset\n", pos, lines);
-                }
+                
+                if(pos >= width)
+                    break;
             }
         }
+        while(pos < width);
+
+        printf("\tl%06d : End Of line, drawing %d times.\n", cur_line, line_repeat);
+
+        // write lines
+        for(i = 0 ; i < line_repeat ; ++i)
+        {
+            bmp_set_line(bmp, cur_line, line_container);
+            ++cur_line;
+        }
     }
-    while(lines < height);
+    while(cur_line < height);
 }
 
 #define FORMAT_BMP  "page%04d.bmp"
