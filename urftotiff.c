@@ -48,6 +48,7 @@ void die(char * str)
 struct tiff_info
 {
     TIFF * tif;
+    unsigned pagecount;
     unsigned width;
     unsigned height;
     unsigned pixel_bytes;
@@ -56,11 +57,21 @@ struct tiff_info
     unsigned bpp;
 };
 
-int create_tiff_file(char * filename, unsigned width, unsigned height, struct tiff_info * info, int bpp, unsigned dpi)
+int create_tiff_file(struct tiff_info * info, char * filename, unsigned pagecount)
 {
     info->tif = TIFFOpen(filename, "wb");
 
     if(info->tif == NULL) die("TIFF open error");
+
+    info->pagecount = pagecount;
+
+    return 0;
+}
+
+int add_tiff_page(struct tiff_info * info, int pagen, unsigned width, unsigned height, int bpp, unsigned dpi)
+{
+    if(pagen)
+        TIFFWriteDirectory(info->tif);
 
     TIFFSetField(info->tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(info->tif, TIFFTAG_IMAGELENGTH, height);
@@ -77,6 +88,8 @@ int create_tiff_file(char * filename, unsigned width, unsigned height, struct ti
 
     TIFFSetField(info->tif, TIFFTAG_COMPRESSION, COMPRESSION_PACKBITS);
 
+    TIFFSetField(info->tif, TIFFTAG_PAGENUMBER, pagen, info->pagecount);
+
     info->width = width;
     info->height = height;
     info->pixel_bytes = bpp/8;
@@ -88,6 +101,7 @@ int create_tiff_file(char * filename, unsigned width, unsigned height, struct ti
 
 int close_tiff_file(struct tiff_info * info)
 {
+    TIFFWriteDirectory(info->tif);
     TIFFClose(info->tif);
     return 0;
 }
@@ -251,15 +265,18 @@ int decode_raster(int fd, int width, int height, int bpp, struct tiff_info * tif
     while(cur_line < height);
 }
 
-#define FORMAT_TIFF  "page%04d.tiff"
-
 int main(int argc, char **argv)
 {
     int fd, page, fd_tiff, ret;
     struct urf_file_header head, head_orig;
     struct urf_page_header page_header, page_header_orig;
     struct tiff_info tiff;
-    char tifffile[255];
+
+    if(argc < 3)
+    {
+        fprintf(stderr, "Usage: %s <input.urf> <output.tiff>\n", argv[0]);
+        return 1;
+    }
 
     if((fd = open(argv[1], O_RDONLY)) == -1) die("Unable to open unirast file");
 
@@ -277,6 +294,8 @@ int main(int argc, char **argv)
     if(strncmp(head.unirast, "UNIRAST", 7) != 0) die("Bad File Header");
 
     iprintf("%s file, with %d page(s).\n", head.unirast, head.page_count);
+
+    if(create_tiff_file(&tiff, argv[2], head.page_count) != 0) die("Unable to create TIFF file");
 
     for(page = 0 ; page < head.page_count ; ++page)
     {
@@ -303,18 +322,12 @@ int main(int argc, char **argv)
         iprintf("Size : %dx%d pixels\n", page_header.width, page_header.height);
         iprintf("Dots per Inches : %d\n", page_header.dot_per_inch);
 
-        sprintf(tifffile, FORMAT_TIFF, page);
-
-        iprintf("TIFF File '%s'\n", tifffile);
-
-        if(create_tiff_file(tifffile, page_header.width, page_header.height, &tiff, page_header.bpp, page_header.dot_per_inch) != 0) die("Unable to create TIFF file");
+        if(add_tiff_page(&tiff, page, page_header.width, page_header.height, page_header.bpp, page_header.dot_per_inch) != 0) die("Unable to create TIFF file");
 
         decode_raster(fd, page_header.width, page_header.height, page_header.bpp, &tiff);
-
-        close_tiff_file(&tiff);
-
-        memset(&tiff, 0, sizeof(tiff));
     }
+
+    close_tiff_file(&tiff);
 
     return 0;
 }
