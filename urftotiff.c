@@ -27,9 +27,19 @@
 #include <string.h>
 #include "tiffio.h"
 
+#define PROGRAM "urftotiff"
+
+#ifdef URF_DEBUG
+#define dprintf(format, ...) fprintf(stderr, "DEBUG: (" PROGRAM ") " format, __VA_ARGS__)
+#else
+#define dprintf(format, ...)
+#endif
+
+#define iprintf(format, ...) fprintf(stderr, "INFO: (" PROGRAM ") " format, __VA_ARGS__)
+
 void die(char * str)
 {
-    printf("die(%s) [%m]\n", str);
+    printf("CRIT: (" PROGRAM ") die(%s) [%m]\n", str);
     exit(1);
 }
 
@@ -84,11 +94,11 @@ int close_tiff_file(struct tiff_info * info)
 
 void tiff_set_line(struct tiff_info * info, int line_n, uint8_t line[])
 {
-    printf("tiff_set_line(%d)\n", line_n);
+    dprintf("tiff_set_line(%d)\n", line_n);
 
     if(line_n > info->height)
     {
-        printf("Bad line %d\n", line_n);
+        dprintf("Bad line %d\n", line_n);
         return;
     }
     
@@ -135,13 +145,13 @@ int decode_raster(int fd, int width, int height, int bpp, struct tiff_info * tif
     {
         if(read(fd, &line_repeat_byte, 1) < 1)
         {
-            printf("l%06d : line_repeat EOF at %lu\n", cur_line, lseek(fd, 0, SEEK_CUR));
+            dprintf("l%06d : line_repeat EOF at %lu\n", cur_line, lseek(fd, 0, SEEK_CUR));
             return 1;
         }
 
         line_repeat = (unsigned)line_repeat_byte + 1;
 
-        printf("l%06d : next actions for %d lines\n", cur_line, line_repeat);
+        dprintf("l%06d : next actions for %d lines\n", cur_line, line_repeat);
 
         // Start of line
         pos = 0;
@@ -150,15 +160,15 @@ int decode_raster(int fd, int width, int height, int bpp, struct tiff_info * tif
         {
             if(read(fd, &packbit_code, 1) < 1)
             {
-                printf("p%06dl%06d : packbit_code EOF at %lu\n", pos, cur_line, lseek(fd, 0, SEEK_CUR));
+                dprintf("p%06dl%06d : packbit_code EOF at %lu\n", pos, cur_line, lseek(fd, 0, SEEK_CUR));
                 return 1;
             }
 
-            printf("p%06dl%06d: Raster code %02X='%d'.\n", pos, cur_line, (uint8_t)packbit_code, packbit_code);
+            dprintf("p%06dl%06d: Raster code %02X='%d'.\n", pos, cur_line, (uint8_t)packbit_code, packbit_code);
 
             if(packbit_code == -128)
             {
-                printf("\tp%06dl%06d : blank rest of line.\n", pos, cur_line);
+                dprintf("\tp%06dl%06d : blank rest of line.\n", pos, cur_line);
                 memset((line_container+(pos*pixel_size)), 0xFF, (pixel_size*(width-pos)));
                 pos = width;
                 break;
@@ -170,14 +180,14 @@ int decode_raster(int fd, int width, int height, int bpp, struct tiff_info * tif
                 //Read pixel
                 if(read(fd, pixel_container, pixel_size) < pixel_size)
                 {
-                    printf("p%06dl%06d : pixel repeat EOF at %lu\n", pos, cur_line, lseek(fd, 0, SEEK_CUR));
+                    dprintf("p%06dl%06d : pixel repeat EOF at %lu\n", pos, cur_line, lseek(fd, 0, SEEK_CUR));
                     return 1;
                 }
 
-                printf("\tp%06dl%06d : Repeat pixel '", pos, cur_line);
+                dprintf("\tp%06dl%06d : Repeat pixel '", pos, cur_line);
                 for(j = 0 ; j < pixel_size ; ++j)
-                    printf("%02X ", pixel_container[j]);
-                printf("' for %d times.\n", n);
+                    dprintf("%02X ", pixel_container[j]);
+                dprintf("' for %d times.\n", n);
 
                 for(i = 0 ; i < n ; ++i)
                 {
@@ -191,7 +201,7 @@ int decode_raster(int fd, int width, int height, int bpp, struct tiff_info * tif
 
                 if(i < n && pos >= width)
                 {
-                    printf("\tp%06dl%06d : Forced end of line for pixel repeat.\n", pos, cur_line);
+                    dprintf("\tp%06dl%06d : Forced end of line for pixel repeat.\n", pos, cur_line);
                 }
                 
                 if(pos >= width)
@@ -201,13 +211,13 @@ int decode_raster(int fd, int width, int height, int bpp, struct tiff_info * tif
             {
                 int n = (-(int)packbit_code)+1;
 
-                printf("\tp%06dl%06d : Copy %d verbatim pixels.\n", pos, cur_line, n);
+                dprintf("\tp%06dl%06d : Copy %d verbatim pixels.\n", pos, cur_line, n);
 
                 for(i = 0 ; i < n ; ++i)
                 {
                     if(read(fd, pixel_container, pixel_size) < pixel_size)
                     {
-                        printf("p%06dl%06d : literal_pixel EOF at %lu\n", pos, cur_line, lseek(fd, 0, SEEK_CUR));
+                        dprintf("p%06dl%06d : literal_pixel EOF at %lu\n", pos, cur_line, lseek(fd, 0, SEEK_CUR));
                         return 1;
                     }
                     //Invert pixels, should be programmable
@@ -220,7 +230,7 @@ int decode_raster(int fd, int width, int height, int bpp, struct tiff_info * tif
 
                 if(i < n && pos >= width)
                 {
-                    printf("\tp%06dl%06d : Forced end of line for pixel copy.\n", pos, cur_line);
+                    dprintf("\tp%06dl%06d : Forced end of line for pixel copy.\n", pos, cur_line);
                 }
                 
                 if(pos >= width)
@@ -229,7 +239,7 @@ int decode_raster(int fd, int width, int height, int bpp, struct tiff_info * tif
         }
         while(pos < width);
 
-        printf("\tl%06d : End Of line, drawing %d times.\n", cur_line, line_repeat);
+        dprintf("\tl%06d : End Of line, drawing %d times.\n", cur_line, line_repeat);
 
         // write lines
         for(i = 0 ; i < line_repeat ; ++i)
@@ -263,7 +273,7 @@ int main(int argc, char **argv)
 
     if(head.unirast[7])
         head.unirast[7] = 0;
-    printf("%s file, with %d page(s).\n", head.unirast, head.page_count);
+    iprintf("%s file, with %d page(s).\n", head.unirast, head.page_count);
 
     for(page = 0 ; page < head.page_count ; ++page)
     {
@@ -282,22 +292,17 @@ int main(int argc, char **argv)
         page_header.unknown2 = 0;
         page_header.unknown3 = 0;
 
-        printf("Page %d :\n", page);
-        printf("\tBits Per Pixel : %d\n"
-               "\tColorspace : %d\n"
-               "\tDuplex Mode : %d\n"
-               "\tQuality : %d\n"
-               "\tSize : %dx%d pixels\n"
-               "\tDots per Inches : %d\n",
-                page_header.bpp,
-                page_header.colorspace,
-                page_header.duplex,
-                page_header.quality,
-                page_header.width,
-                page_header.height,
-                page_header.dot_per_inch);
+        iprintf("Page %d :\n", page);
+        iprintf("Bits Per Pixel : %d\n", page_header.bpp);
+        iprintf("Colorspace : %d\n", page_header.colorspace);
+        iprintf("Duplex Mode : %d\n", page_header.duplex);
+        iprintf("Quality : %d\n", page_header.quality);
+        iprintf("Size : %dx%d pixels\n", page_header.width, page_header.height);
+        iprintf("Dots per Inches : %d\n", page_header.dot_per_inch);
 
         sprintf(tifffile, FORMAT_TIFF, page);
+
+        iprintf("TIFF File '%s'\n", tifffile);
 
         if(create_tiff_file(tifffile, page_header.width, page_header.height, &tiff, page_header.bpp, page_header.dot_per_inch) != 0) die("Unable to create TIFF file");
 
