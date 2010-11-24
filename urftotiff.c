@@ -46,7 +46,7 @@ struct tiff_info
     unsigned bpp;
 };
 
-int create_tiff_file(char * filename, unsigned width, unsigned height, struct tiff_info * info, int bpp)
+int create_tiff_file(char * filename, unsigned width, unsigned height, struct tiff_info * info, int bpp, unsigned dpi)
 {
     info->tif = TIFFOpen(filename, "wb");
 
@@ -60,6 +60,10 @@ int create_tiff_file(char * filename, unsigned width, unsigned height, struct ti
     TIFFSetField(info->tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
     TIFFSetField(info->tif, TIFFTAG_PHOTOMETRIC, PHOTOMETRIC_RGB);
     TIFFSetField(info->tif, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(info->tif, (uint32_t)-1));
+
+    TIFFSetField(info->tif, TIFFTAG_XRESOLUTION, (float)dpi);
+    TIFFSetField(info->tif, TIFFTAG_YRESOLUTION, (float)dpi);
+    TIFFSetField(info->tif, TIFFTAG_RESOLUTIONUNIT, RESUNIT_INCH);
 
     TIFFSetField(info->tif, TIFFTAG_COMPRESSION, COMPRESSION_PACKBITS);
 
@@ -179,7 +183,7 @@ int decode_raster(int fd, int width, int height, int bpp, struct tiff_info * tif
                 {
                     //for(j = pixel_size-1 ; j >= 0 ; --j)
                     for(j = 0 ; j < pixel_size ; ++j)
-                        line_container[pixel_size*pos + j] = pixel_container[(pixel_size-j-1)];
+                        line_container[pixel_size*pos + j] = pixel_container[j];
                     ++pos;
                     if(pos >= width)
                         break;
@@ -208,7 +212,7 @@ int decode_raster(int fd, int width, int height, int bpp, struct tiff_info * tif
                     }
                     //Invert pixels, should be programmable
                     for(j = 0 ; j < pixel_size ; ++j)
-                        line_container[pixel_size*pos + j] = pixel_container[(pixel_size-j-1)];
+                        line_container[pixel_size*pos + j] = pixel_container[j];
                     ++pos;
                     if(pos >= width)
                         break;
@@ -295,7 +299,7 @@ int main(int argc, char **argv)
 
         sprintf(tifffile, FORMAT_TIFF, page);
 
-        if(create_tiff_file(tifffile, page_header.width, page_header.height, &tiff, page_header.bpp) != 0) die("Unable to create TIFF file");
+        if(create_tiff_file(tifffile, page_header.width, page_header.height, &tiff, page_header.bpp, page_header.dot_per_inch) != 0) die("Unable to create TIFF file");
 
         decode_raster(fd, page_header.width, page_header.height, page_header.bpp, &tiff);
 
