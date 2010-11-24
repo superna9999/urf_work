@@ -273,6 +273,9 @@ int main(int argc, char **argv)
 
     if(head.unirast[7])
         head.unirast[7] = 0;
+
+    if(strncmp(head.unirast, "UNIRAST", 7) != 0) die("Bad File Header");
+
     iprintf("%s file, with %d page(s).\n", head.unirast, head.page_count);
 
     for(page = 0 ; page < head.page_count ; ++page)

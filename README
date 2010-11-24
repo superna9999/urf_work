@@ -1,9 +1,10 @@
 This is an inital work on UNIRAST format
 
 The urftobmp.c program is a simple GNU C program which decodes an UNIRAST file to a bmp file per page.
-
 It does not handle the Colorspace/Duplex Mode/Quality or Dots per Inches informations.
 
-It has huge debug output, you should dump the output to a file or to /dev/null !
+The urftotiff.c program is a simple GNU C program which decodes an UNIRAST file to a tiff packbits compressed file per page.
+It does not handle the Colorspace/Duplex Mode/Quality informations.
+It depends on the libtiff.
 
 Thanks for http://alanQuatermain.net/ for its URF file partial decode.
